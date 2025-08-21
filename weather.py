@@ -3,10 +3,11 @@
 
 #Global settings:
 station = 'STATION ID HERE'
-token = 'API TOKEN HERE'
-nwszone = 'NWS COUNTY CODE HERE'
-memes = 1 #Enter 1 for on, 0 (zero, not the letter O) for off if you hate kittens
-wind_thresh = 15 #Wind gust speed to trigger windy icon
+token = 'TEMPEST API TOKEN HERE'
+nwszone = 'NWS ZONE HERE'
+memes = 1 #Enter 1 for on, 0 (zero, not the letter O) for off
+wind_thresh = 15
+tout = 3 #Timeout for accessing data. If the error screen comes up too often increase this time
 
 #API URLs
 URL = 'https://swd.weatherflow.com/swd/rest/better_forecast?station_id=' + station + '&units_temp=f&units_wind=mph&units_pressure=inhg&units_precip=in&units_distance=mi&token=' + token
@@ -86,6 +87,29 @@ def create_image_w2(size, bgColor, message, font, fontColor):
     draw.text((((W-w)/2)-20, (H-h)/2), message, font=font, fill=fontColor)
     return image
 
+def create_feelslike_image(feels_file=None, paste_icon=False):
+    center_feels = Image.new(mode='RGB', size=(520, 65), color='white')
+    draw = ImageDraw.Draw(center_feels)
+    x = (center_feels.width // 2) - 35 if feels_file else (center_feels.width // 2)
+    y = center_feels.height // 2
+
+    # Get accurate text size
+    bbox = draw.textbbox((0, 0), string_feels_like, font=font50, anchor='lt')
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    # Draw centered text
+    draw.text((x, y), string_feels_like, fill='black', font=font50, anchor='mm')
+    
+    # If there's an icon to paste, do it
+    if paste_icon and feels_file:
+        feels_image = Image.open(os.path.join(icondir, feels_file)).convert('RGBA')
+        icon_y = (center_feels.height - feels_image.height) // 2
+        icon_x = x + (text_width // 2) + 25  # 25 px margin right of text
+        center_feels.paste(feels_image, (icon_x, icon_y), feels_image)
+
+    return center_feels
+
 # Set the fonts
 font20 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 20)
 font22 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 22)
@@ -115,7 +139,7 @@ while True:
         try:
             # HTTP request
             print('Attempting to connect to Tempest WX.')
-            response = requests.get(URL, timeout = 2.5)
+            response = requests.get(URL, timeout = tout)
             if response.status_code == 200:
                 print('Connection to Tempest WX successful.')
                 error_connect = None
@@ -162,7 +186,7 @@ while True:
                 icon_code = 'windy-meme'
             elif memes ==1 and dewpt >= 76:
                 icon_code = 'death-meme'
-                report = 'Death'                
+                report = 'Death'
             elif memes ==1 and feels_like >= 95 and (humidity >= 60 or dewpt >= 70) :
                 icon_code = 'angry-sun-meme'
                 report = 'World 2-'
@@ -225,8 +249,6 @@ while True:
 
             if alert != None:
                 string_event = event
-            #string_event = 'Severe Thunderstorm Warning'
-            #print(string_event)
 
             # Set strings to be printed to screen
             string_temp_current = format(temp_current, '.0f') + u'\N{DEGREE SIGN}F'
@@ -292,8 +314,8 @@ while True:
     else:
         baro_file = 'baroup.png'
     baro_image = Image.open(os.path.join(icondir, baro_file))
-    template.paste(baro_image, (15, 213)) #15, 218
-    draw.text((65, 223), string_baro, font=font22, fill=black) #65,228
+    template.paste(baro_image, (15, 213))
+    draw.text((65, 223), string_baro, font=font22, fill=black)
 
     #Precipitation Logic
     if temp_current <= 39 and temp_current >= 33:
@@ -303,70 +325,43 @@ while True:
     else:
         precip_file = 'precip.png'
     precip_image = Image.open(os.path.join(icondir, precip_file))
-    template.paste(precip_image, (15, 255)) #15, 260
-    draw.text((65, 263), string_precip_percent, font=font22, fill=black) #65, 268
+    template.paste(precip_image, (15, 255))
+    draw.text((65, 263), string_precip_percent, font=font22, fill=black)
 
     #Main temp centered
-    temp_center = create_image((530, 190), 'white', string_temp_current, font160, 'black') #365, 190
-    template.paste(temp_center, (263,20)) #580,35
+    temp_center = create_image((530, 190), 'white', string_temp_current, font160, 'black')
+    template.paste(temp_center, (263,20)) 
     difference = int(feels_like) - int(temp_current)
 
     #Center Feels Like
     if memes == 0 and dewpt >= 76:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = ((textImg2.width // 2)- 35) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        feels_file = 'death.png'
-        feels_image = Image.open(os.path.join(icondir, feels_file))
-        textImg2.paste(feels_image, ((((265 + text_width) // 2 ) + 100), 3))
-        template.paste(textImg2, (265, 195))
-        
-    if (report != 'Death' and report != 'World 2-') and difference >= 5:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = ((textImg2.width // 2)- 35) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        feels_file = 'feelshot.png'
-        feels_image = Image.open(os.path.join(icondir, feels_file))
-        textImg2.paste(feels_image, ((((265 + text_width) // 2 ) + 100), 3))
-        template.paste(textImg2, (265, 195))
+        img_out = create_feelslike_image('death.png', paste_icon=True)
+        template.paste(img_out, (265, 195)) 
+
+    elif (report != 'Death' and report != 'World 2-') and difference >= 5:
+        img_out = create_feelslike_image('feelshot.png', paste_icon=True)
+        template.paste(img_out, (265, 195))
 
     elif difference <= -5:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = ((textImg2.width // 2)- 35) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        feels_file = 'feelscold.png'
-        feels_image = Image.open(os.path.join(icondir, feels_file))
-        textImg2.paste(feels_image, ((((265 + text_width) // 2 ) + 100), 3))
-        template.paste(textImg2, (265, 195))
+        img_out = create_feelslike_image('feelscold.png', paste_icon=True)
+        template.paste(img_out, (265, 195))
 
     else:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = (textImg2.width // 2) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        template.paste(textImg2, (265, 195))
+        img_out = create_feelslike_image()
+        template.paste(img_out, (265, 195))
+
+
 
     #High/Low temps
-    draw.text((35, 330), string_temp_max, font=font50, fill=black) #35,325
+    draw.text((35, 330), string_temp_max, font=font50, fill=black)
     draw.line((170, 390, 265, 390), fill=black, width=4)
-    draw.text((35, 395), string_temp_min, font=font50, fill=black) #35,390
+    draw.text((35, 395), string_temp_min, font=font50, fill=black)
 
     #Rh, Dew Point and Wind
     rh_file = 'rh.png'
     rh_image = Image.open(os.path.join(icondir, rh_file))
     template.paste(rh_image, (320, 320))
-    draw.text((370, 330), string_humidity, font=font23, fill=black) #345, 340
+    draw.text((370, 330), string_humidity, font=font23, fill=black)
     dp_file = 'dp.png'
     dp_image = Image.open(os.path.join(icondir, dp_file))
     template.paste(dp_image, (320, 373))
@@ -374,7 +369,7 @@ while True:
     wind_file = 'wind.png'
     wind_image = Image.open(os.path.join(icondir, wind_file))
     template.paste(wind_image, (320, 425))
-    draw.text((370, 435), string_wind, font=font23, fill=black) #345, 400
+    draw.text((370, 435), string_wind, font=font23, fill=black)
 
     #Update time with lightning mod
     #Begin Lightning mod
@@ -400,45 +395,73 @@ while True:
 
     #Precipitaton mod
     if total_rain > 0 or total_rain == 1000:
-        textImg3 = Image.new(mode='RGB', size=(530, 50), color='white')
-        draw4 = ImageDraw.Draw(textImg3)
-        x3 = ((textImg2.width // 2) + 25)
-        y3 = ((textImg2.height // 2) - 10)
-        draw4.text((x3, y3), string_total_rain, fill='black', font=font23, anchor='mm')
-        text_width2, text_height2 = draw.textsize(string_total_rain, font=font23)
+        center_precip = Image.new(mode='RGB', size=(530, 50), color='white')
+        draw = ImageDraw.Draw(center_precip)
+        x = (center_precip.width // 2) + 25
+        y = (center_precip.height // 2)
+    
+        # Get bounding box for accurate text size
+        bbox = draw.textbbox((0, 0), string_total_rain, font=font23, anchor='lt')
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+
+        # Draw centered text
+        draw.text((x, y), string_total_rain, fill='black', font=font23, anchor='mm')
+
+        # Prepare the icon
         train_file = 'totalrain.png'
-        train_image = Image.open(os.path.join(icondir, train_file))
-        textImg3.paste(train_image, ((((x3 - (text_width2 //2))) -50), 0)) #-150
-        template.paste(textImg3, (263, 15))
+        train_image = Image.open(os.path.join(icondir, train_file)).convert('RGBA')
+        icon_y = (center_precip.height - train_image.height) // 2
+        icon_x = x - (text_width // 2) - train_image.width - 10  # 10 px margin
+
+        # Paste icon, respecting transparency
+        center_precip.paste(train_image, (icon_x, icon_y), train_image)
+
+        # Paste result
+        template.paste(center_precip, (263, 15))
 
     #Severe Weather Mod
     try:
-         if string_event != None:
+        if string_event is not None:
+            # Center the warning data at the bottom of the screen
+            warning_img = Image.new(mode='RGB', size=(530, 40), color='white')
+            draw = ImageDraw.Draw(warning_img)
 
-            #Center the warning data at the bottom of the screen
-            textImg = Image.new(mode='RGB', size=(530, 40), color='white')
-            draw2 = ImageDraw.Draw(textImg)
+            # Select alert image and x offset
             if 'Special' in string_event:
-                x = (textImg.width // 2 + 25)
-                y = (textImg.height // 2)
-                draw2.text((x, y), string_event, fill='black', font=font23, anchor='mm')
-                text_width, text_height = draw.textsize(string_event, font=font23)
+                x = (warning_img.width // 2) + 25
                 alert_file = 'info.png'
-                alert_image = Image.open(os.path.join(icondir, alert_file))
-                textImg.paste(alert_image, (((x - (text_width //2)) - 50) , 0))
             else:
-                x = (textImg.width // 2)
-                y = (textImg.height // 2)
-                draw2.text((x, y), string_event, fill='black', font=font23, anchor='mm')
-                text_width, text_height = draw.textsize(string_event, font=font23)
+                x = (warning_img.width // 2)
                 alert_file = 'warning.png'
-                alert_image = Image.open(os.path.join(icondir, alert_file))
-                textImg.paste(alert_image, (((x - (text_width //2)) - 50) , 0))
-                textImg.paste(alert_image, (((x + (text_width //2)) + 10) , 0))
-            template.paste(textImg, (263, 255))
+            y = (warning_img.height // 2)
+
+            # Calculate accurate text bounding box
+            bbox = draw.textbbox((0, 0), string_event, font=font23, anchor='lt')
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+
+            # Draw text
+            draw.text((x, y), string_event, fill='black', font=font23, anchor='mm')
+
+            # Load alert image with transparency
+            alert_image = Image.open(os.path.join(icondir, alert_file)).convert('RGBA')
+            icon_y = (warning_img.height - alert_image.height) // 2
+            left_icon_x = x - (text_width // 2) - alert_image.width - 10  # 10 px space left
+
+            warning_img.paste(alert_image, (left_icon_x, icon_y), alert_image)
+
+            # For non-Special, also paste an icon at the right end of the text
+            if 'Special' not in string_event:
+                right_icon_x = x + (text_width // 2) + 10  # 10 px space right
+                warning_img.paste(alert_image, (right_icon_x, icon_y), alert_image)
+
+            # Paste the final composite image onto the template
+            template.paste(warning_img, (263, 255))
 
     except NameError:
         print('No Severe Weather')
+        
     # Save the image for display as PNG
     screen_output_file = os.path.join(picdir, 'screen_output.png')
     template.save(screen_output_file)
