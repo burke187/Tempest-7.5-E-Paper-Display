@@ -5,6 +5,12 @@
 <br>
 <img src="https://github.com/OG-Anorine/Tempest-7.5-E-Paper-Display/blob/master/photos/IMG_6607.jpeg" width=40% height=40%>
 <h1>Versions</h1>
+  <h2>Version 1.5</h2>
+    <ul>
+		<li>Updated compatability for Debian 13 (Trixie)</li>
+		<li>Removed deprecated Pillow centering methods</li>
+		<li>Cleaned up development comments</li>
+	</ul>
   <h2>Version 1.4</h2>
     <ul>
 	    <li>Easier configuration - All inputs at top of script</li>
