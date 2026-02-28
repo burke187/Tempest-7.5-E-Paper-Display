@@ -31,7 +31,8 @@ Raspberry Pi weather display using Waveshare e-paper 7.5 inch display, Tempest W
 
   ```bash
   sudo crontab -e
-*/5 * * * * sudo python /path/to/weather.py > /dev/null 2>&1 &
+  ```
+```*/5 * * * * sudo python /path/to/weather.py > /dev/null 2>&1 &
 0 4 * * * sudo /sbin/reboot
 ```
 This runs the Python script every 5 minutes and updates the screen.
