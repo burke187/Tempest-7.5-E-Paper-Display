@@ -13,13 +13,11 @@
     <li>Open 'weather.py' and replace **Station ID here** with you station ID (Log into tempestwx.com - after successful login your station id will be listed at the end of the URL: https://tempestwx.com/station/XXXXXX) and **Token Here** with your API key (Create authorization at https://tempestwx.com/settings/tokens).</li>
     <li>Get your State/County ID from NSW to populate Watch/Warning data.  I have not found a great way to get this data other than using a multi-step process.  1. Go to https://www.weather.gov and enter your ZIP code on the left.  2. After the locaiton loads, click on "Get detailed info" 3. Select your city if needed 4. Get the coordinates out of the URL - these will be plugged into the API via browser of your choice: https://api.weather.gov/points/[start,end] - read through the data and look for "county": at the end of the JSON response.  This is your county code to plug into the Python code.  </li>
     <li>Create 2 cronjobs in the root crontab: 
-      ```
-      sudo crontab -e
-      ```
-      ```
-      */5 * * * * sudo python /path/to/weather.py > /dev/null 2>&1 &
-      0 4 * * * sudo /sbin/reboot
-      ```
+        `sudo crontab -e`
+        ```
+        */5 * * * * sudo python /path/to/weather.py > /dev/null 2>&1 &
+        0 4 * * * sudo /sbin/reboot
+        ```
       This runs the python script every 5 minutes and updates the screen. Logs are sent to /dev/null to save memory. The second cron reboots the Raspberry Pi every day at 4am.
     </li>
   </ol>
