@@ -13,30 +13,17 @@
     <li>Open 'weather.py' and replace **Station ID here** with you station ID (Log into tempestwx.com - after successful login your station id will be listed at the end of the URL: https://tempestwx.com/station/XXXXXX) and **Token Here** with your API key (Create authorization at https://tempestwx.com/settings/tokens).</li>
     <li>Get your State/County ID from NSW to populate Watch/Warning data.  I have not found a great way to get this data other than using a multi-step process.  1. Go to https://www.weather.gov and enter your ZIP code on the left.  2. After the locaiton loads, click on "Get detailed info" 3. Select your city if needed 4. Get the coordinates out of the URL - these will be plugged into the API via browser of your choice: https://api.weather.gov/points/[start,end] - read through the data and look for "county": at the end of the JSON response.  This is your county code to plug into the Python code.  </li>
     <li>Create 2 cronjobs in the root crontab: 
-      `sudo crontab -e`
-      `*/5 * * * * sudo python /path/to/weather.py > /dev/null 2>&1 &`
-      `0 4 * * * sudo /sbin/reboot`
+      ```
+      sudo crontab -e
+      ```
+      ```
+      */5 * * * * sudo python /path/to/weather.py > /dev/null 2>&1 &`
+      0 4 * * * sudo /sbin/reboot
+      ```
       This runs the python script every 5 minutes and updates the screen. Logs are sent to /dev/null to save memory. The second cron reboots the Raspberry Pi every day at 4am.
     </li>
   </ol>
-<br> 
-
-# Note 
-The storm data on this build is dynamic.  Rain totals, severe weather alerts, and lightning strike data only show up when it is present.  This is intentional to reduce clutter on the screen.
-
-<b>Storm data:</b>
-<br>
-<img src="https://github.com/OG-Anorine/Tempest-7.5-E-Paper-Display/blob/master/photos/storm.png"> 
-<br>
-<b>Normal:</b>
-<br>
-<img src="https://github.com/OG-Anorine/Tempest-7.5-E-Paper-Display/blob/master/photos/no_storm.png"> 
-<br>
-<br>
-If you are not using a 7.5 inch Version 2b display, you will want to replace 'epd7in5b_V2.py' in the 'lib' folder with whichever one you have from https://github.com/waveshare/e-Paper/tree/master/RaspberryPi_JetsonNano/python/lib/waveshare_epd<br>
-Fairly extensive adjustments will have to be made for other sized screens.
-
-Optional items - there is code embedded that at a gust of 10MPH (at time of refresh) the current weather status will update to "IT HECKIN WIMDY" meme.  This was a nod to the Mrs who loves the meme, but by no means is required to remain.  THis section of code can easily be commented out and the windy.png icon replaced.  Simply remove windy.png and rename windy2.png to windy.png.  
+<br>  
 
 # Parts
 <ul>
@@ -45,7 +32,6 @@ Optional items - there is code embedded that at a gust of 10MPH (at time of refr
   <li>SD card for the Pi at least 8 GB.</li>
   <li>Power supply for the Pi.</li>
   <li>5 x 7 inch photo frame</li>
-  <li>Optional: 3D printer to print new back/mask for frame</li>
 </ul>
 
 
