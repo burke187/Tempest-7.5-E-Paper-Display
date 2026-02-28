@@ -374,7 +374,7 @@ while True:
         # sunrise_file = 'sunrise.png'
         # sunrise_image = Image.open(os.path.join(icondir, sunrise_file))
         # template.paste(sunrise_image, (615, 320)) #15, 218
-        draw.text((615, 330), 'Sunrise: ' + sunrise_time, font=font25, fill=black) #65,228
+        draw.text((615, 330), 'Sunrise: ' + sunrise_time, font=font25, fill=white) #65,228
 
         sunset_time = sunset.astimezone(eastern_timezone).strftime('%H:%M')
         # sunset_file = 'sunset.png'
