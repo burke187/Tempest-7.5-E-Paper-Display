@@ -2,6 +2,8 @@
 
 Raspberry Pi weather display using Waveshare e-paper 7.5 inch display, Tempest Weather Station data, and Python.
 
+![Screen Output](https://github.com/burke187/Tempest-7.5-E-Paper-Display/blob/master/pic/screen_output.png)
+
 # Versions
 
 ## Version 1.0
