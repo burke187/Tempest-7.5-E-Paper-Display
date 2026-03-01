@@ -242,7 +242,7 @@ while True:
             display_error('HTTP')
 
     # Open template file
-    template = Image.open(os.path.join(picdir, 'template4.png'))
+    template = Image.open(os.path.join(picdir, 'template.png'))
     # Initialize the drawing context with template as background
     draw = ImageDraw.Draw(template)
 
