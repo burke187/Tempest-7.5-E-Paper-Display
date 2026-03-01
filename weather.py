@@ -102,8 +102,8 @@ epd.init()
 epd.Clear()
 
 #TempestWX URL with API Token and Station ID
-station = '183268'
-token = '08faf8e0-4e08-4851-be6d-dd00af392772'
+station = 'STATION_ID'
+token = 'TEMPEST_TOKEN'
 
 #NWS Location code
 nwsloc = 'MIC009'
