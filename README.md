@@ -12,13 +12,18 @@ Raspberry Pi weather display using Waveshare e-paper 7.5 inch display, Tempest W
 - Assuming you have a Pi of your choice loaded, you will need to setup the e-paper display per the instructions from WaveShare:  
   https://www.waveshare.com/wiki/7.5inch_e-Paper_HAT_(B)_Manual#Working_With_Raspberry_Pi  
   *Note: these instructions are for the 3 color screen which I am using. I have included comments in the code to change it back to the 2 color if desired.*
+- Create a file named `.env` in the root directory. The content of the file should be as follows:
+  ```bash
+  STATION_ID=12345
+  COUNTY_CODE=YOURCODE
+  TEMPEST_TOKEN=your-tempest-token
+  ```
+-- Your `STATION_ID` will be in the URL when you log in:
+  `https://tempestwx.com/station/XXXXXX`  
 
-- Open `weather.py` and replace `STATION_ID` with your station ID  
-  (Log into tempestwx.com — after successful login your station ID will be listed at the end of the URL:  
-  `https://tempestwx.com/station/XXXXXX`)  
-  Replace `TEMPEST_TOKEN` with your API key (Create authorization at https://tempestwx.com/settings/tokens).
+-- Your `TEMPEST_TOKEN` is the token you generated here: https://tempestwx.com/settings/tokens
 
-- Get your State/County ID from NWS to populate Watch/Warning data.  
+-- Get your `COUNTY_CODE` from NWS to populate Watch/Warning data.  
   Steps:  
   1. Go to https://www.weather.gov and enter your ZIP code.  
   2. After the location loads, click **"Get detailed info"**.  

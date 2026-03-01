@@ -5,6 +5,10 @@ import sys
 import os
 import RPi.GPIO as GPIO
 import gc
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 picdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'pic')
 icondir = os.path.join(picdir, 'icon')
@@ -102,11 +106,11 @@ epd.init()
 epd.Clear()
 
 #TempestWX URL with API Token and Station ID
-station = 'STATION_ID'
-token = 'TEMPEST_TOKEN'
+station = os.getenv('STATION_ID')
+token = os.getenv('TEMPEST_TOKEN')
 
 #NWS Location code
-nwsloc = 'MIC009'
+nwsloc = os.getenv('COUNTY_CODE')
 nwsapi = 'https://api.weather.gov/alerts/active?zone=' + nwsloc
 
 URL = 'https://swd.weatherflow.com/swd/rest/better_forecast?station_id=' + station + '&units_temp=f&units_wind=mph&units_pressure=inhg&units_precip=in&units_distance=mi&token=' + token
@@ -238,7 +242,7 @@ while True:
             display_error('HTTP')
 
     # Open template file
-    template = Image.open(os.path.join(picdir, 'template.png'))
+    template = Image.open(os.path.join(picdir, 'template4.png'))
     # Initialize the drawing context with template as background
     draw = ImageDraw.Draw(template)
 
@@ -371,19 +375,19 @@ while True:
         # draw.text((627, 375), current_time, font = font60, fill=white)
         eastern_timezone = pytz.timezone('US/Eastern')
         sunrise_time = sunrise.astimezone(eastern_timezone).strftime('%H:%M')
-        # sunrise_file = 'sunrise.png'
-        # sunrise_image = Image.open(os.path.join(icondir, sunrise_file))
-        # template.paste(sunrise_image, (615, 320)) #15, 218
-        draw.text((615, 330), 'Sunrise: ' + sunrise_time, font=font25, fill=white) #65,228
+        sunrise_file = 'sunrise.png'
+        sunrise_image = Image.open(os.path.join(icondir, sunrise_file))
+        template.paste(sunrise_image, (550, 320)) #15, 218
+        draw.text((615, 330), 'Sunrise: ' + sunrise_time, font=font25, fill=black) #65,228
 
         sunset_time = sunset.astimezone(eastern_timezone).strftime('%H:%M')
-        # sunset_file = 'sunset.png'
-        # sunset_image = Image.open(os.path.join(icondir, sunset_file))
-        # template.paste(sunset_image, (615, 370)) #15, 218
-        draw.text((615, 380), 'Sunset: ' + sunset_time, font=font25, fill=white) #65,228
+        sunset_file = 'sunset.png'
+        sunset_image = Image.open(os.path.join(icondir, sunset_file))
+        template.paste(sunset_image, (550, 370)) #15, 218
+        draw.text((615, 380), 'Sunset: ' + sunset_time, font=font25, fill=black) #65,228
 
         current_time = datetime.now(eastern).strftime('%H:%M')
-        draw.text((615, 430), 'Updated: ' + current_time, font = font25, fill=white)
+        draw.text((615, 430), 'Updated: ' + current_time, font = font25, fill=black)
 
 
     #Precipitaton mod
