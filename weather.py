@@ -392,41 +392,41 @@ while True:
 
     # Draw bottom right box
     #Begin Lightning mod
-    if strikesraw >= 1:
-        strike_file = 'strike.png'
-        strike_image = Image.open(os.path.join(icondir, strike_file))
-        template.paste(strike_image, (605, 305))
-        draw.text((695, 330), 'Strikes', font=font22, fill=white)
-        draw.line((690, 355, 765, 355), fill =white, width=3)
-        strikeimg = Image.new(mode='RGB', size=(50, 20), color='black') 
-        draw1 = ImageDraw.Draw(strikeimg)
-        x0 = (strikeimg.width // 2)
-        y0 = (strikeimg.height // 2)
-        draw1.text((x0, y0), strikes, fill='white', font=font20, anchor='mm')
-        template.paste(strikeimg, (703, 360))
-        draw.text((685, 400), 'Distance', font=font22, fill=white)
-        draw.line((680, 425, 773, 425), fill =white, width=3)
-        draw.text((683, 430), lightningdist, font=font20, fill=white)
-    else:
-        eastern = timezone('US/Eastern')
-        # draw.text((627, 330), 'UPDATED', font=font35, fill=white)
-        # current_time = datetime.now(eastern).strftime('%H:%M')
-        # draw.text((627, 375), current_time, font = font60, fill=white)
-        eastern_timezone = pytz.timezone('US/Eastern')
-        sunrise_time = sunrise.astimezone(eastern_timezone).strftime('%H:%M')
-        sunrise_file = 'sunrise.png'
-        sunrise_image = Image.open(os.path.join(icondir, sunrise_file))
-        template.paste(sunrise_image, (550, 320)) #15, 218
-        draw.text((615, 330), 'Sunrise: ' + sunrise_time, font=font25, fill=black) #65,228
+    # if strikesraw >= 1:
+    #     strike_file = 'strike.png'
+    #     strike_image = Image.open(os.path.join(icondir, strike_file))
+    #     template.paste(strike_image, (605, 305))
+    #     draw.text((695, 330), 'Strikes', font=font22, fill=white)
+    #     draw.line((690, 355, 765, 355), fill =white, width=3)
+    #     strikeimg = Image.new(mode='RGB', size=(50, 20), color='black') 
+    #     draw1 = ImageDraw.Draw(strikeimg)
+    #     x0 = (strikeimg.width // 2)
+    #     y0 = (strikeimg.height // 2)
+    #     draw1.text((x0, y0), strikes, fill='white', font=font20, anchor='mm')
+    #     template.paste(strikeimg, (703, 360))
+    #     draw.text((685, 400), 'Distance', font=font22, fill=white)
+    #     draw.line((680, 425, 773, 425), fill =white, width=3)
+    #     draw.text((683, 430), lightningdist, font=font20, fill=white)
+    # else:
+    eastern = timezone('US/Eastern')
+    # draw.text((627, 330), 'UPDATED', font=font35, fill=white)
+    # current_time = datetime.now(eastern).strftime('%H:%M')
+    # draw.text((627, 375), current_time, font = font60, fill=white)
+    eastern_timezone = pytz.timezone('US/Eastern')
+    sunrise_time = sunrise.astimezone(eastern_timezone).strftime('%H:%M')
+    sunrise_file = 'sunrise.png'
+    sunrise_image = Image.open(os.path.join(icondir, sunrise_file))
+    template.paste(sunrise_image, (550, 320)) #15, 218
+    draw.text((615, 330), 'Sunrise: ' + sunrise_time, font=font25, fill=black) #65,228
 
-        sunset_time = sunset.astimezone(eastern_timezone).strftime('%H:%M')
-        sunset_file = 'sunset.png'
-        sunset_image = Image.open(os.path.join(icondir, sunset_file))
-        template.paste(sunset_image, (550, 370)) #15, 218
-        draw.text((615, 380), 'Sunset: ' + sunset_time, font=font25, fill=black) #65,228
+    sunset_time = sunset.astimezone(eastern_timezone).strftime('%H:%M')
+    sunset_file = 'sunset.png'
+    sunset_image = Image.open(os.path.join(icondir, sunset_file))
+    template.paste(sunset_image, (550, 370)) #15, 218
+    draw.text((615, 380), 'Sunset: ' + sunset_time, font=font25, fill=black) #65,228
 
-        current_time = datetime.now(eastern).strftime('%H:%M')
-        draw.text((615, 430), 'Updated: ' + current_time, font = font25, fill=black)
+    current_time = datetime.now(eastern).strftime('%H:%M')
+    draw.text((615, 430), 'Updated: ' + current_time, font = font25, fill=black)
 
 
     #Precipitaton mod
