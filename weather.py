@@ -143,26 +143,30 @@ while True:
             f.close()
             # get current dict block
             current = wxdata['current_conditions']
-       # get current
-            temp_current = current['air_temperature']
-       # get feels like
-            feels_like = current['feels_like']
+            # get current
+            temp_current = current['air_temperature'] or "-"
+            # get feels like
+            feels_like = current['feels_like'] or "-"
             # get humidity
-            humidity = current['relative_humidity']
+            humidity = current['relative_humidity'] or "-"
+            # get uv
+            uv_index = current['uv']
             #get dew point
-            dewpt = current['dew_point']
+            dewpt = current['dew_point'] or "-"
             # get wind speed
-            wind = current['wind_avg']
-            windcard = current['wind_direction_cardinal']
-            gust =  current['wind_gust']
+            wind = current['wind_avg'] or "-"
+            windcard = current['wind_direction_cardinal'] or "-"
+            gust =  current['wind_gust'] or "-"
             # get description
-            weather = current['conditions']
-            report = current['conditions']
+            report = current['conditions'] or "-"
             if report == 'Thunderstorms Possible':
                 report = 'T-Storms Possible'
             #get pressure trend
             baro = current['sea_level_pressure']
-            trend = current['pressure_trend']
+            if 'pressure_trend' in current:
+                trend = current['pressure_trend']
+            else:
+                trend = "Unknown"
             # get icon url - manually override for wind > 10mph
             icon_code = current['icon']
             if icon_code != 'thunderstorm' and icon_code != 'snow' and icon_code != 'sleet' and icon_code != 'rainy' and gust >= 10:
@@ -181,8 +185,16 @@ while True:
 
             # get daily precip
             daily_precip_percent = daily['precip_probability']
-            total_rain = current['precip_accum_local_day']
-            rain_time = current['precip_minutes_local_day']
+            if 'precip_accum_local_day' in current:
+                total_rain = current['precip_accum_local_day']
+            else:
+                total_rain = "Unknown"
+
+            if 'precip_minutes_local_day' in current:
+                rain_time = current['precip_minutes_local_day']
+            else:
+                rain_time = float('inf')
+
             if rain_time > 0 and total_rain <= 0:
                 total_rain = 1000
             # get min and max temp
@@ -212,11 +224,32 @@ while True:
                 string_event = event
             
             # Set strings to be printed to screen
-            string_temp_current = format(temp_current, '.0f') + u'\N{DEGREE SIGN}F'
-            string_feels_like = 'Feels like: ' + format(feels_like, '.0f') +  u'\N{DEGREE SIGN}F'
-            string_humidity = 'Humidity: ' + str(humidity) + '%'
-            string_dewpt = 'Dew Point: ' + format(dewpt, '.0f') +  u'\N{DEGREE SIGN}F'
-            string_wind = 'Wind: ' + format(wind, '.1f') + ' MPH ' + windcard 
+            # If temp_current is not reported
+            if temp_current == "-":
+                string_temp_current = temp_current + u'\N{DEGREE SIGN}F'
+            else:
+                string_temp_current = format(temp_current, '.0f') + u'\N{DEGREE SIGN}F'
+            # If feels_like is not reported
+            if feels_like == "-":
+                string_feels_like = 'Feels like: ' + feels_like +  u'\N{DEGREE SIGN}F'
+            else:
+                string_feels_like = 'Feels like: ' + format(feels_like, '.0f') +  u'\N{DEGREE SIGN}F'
+            # If humidity is not reported
+            if humidity == "-":
+                string_humidity = 'Humidity: ' + humidity + '%'
+            else:
+                string_humidity = 'Humidity: ' + str(humidity) + '%'
+            # If dewpt is not reported
+            if dewpt == "-":
+                string_dewpt = 'Dew Point: ' + dewpt + u'\N{DEGREE SIGN}F'
+            else:
+                string_dewpt = 'Dew Point: ' + format(dewpt, '.0f') +  u'\N{DEGREE SIGN}F'
+            # If wind is not reported
+            if wind == "-":
+                string_wind = 'Wind: ' + wind + ' MPH ' + windcard
+            else:    
+                string_wind = 'Wind: ' + format(wind, '.1f') + ' MPH ' + windcard 
+            
             formatted_date = datetime.now()
             formatted_date_string = formatted_date.strftime("%a") + " " + formatted_date.strftime("%B") + " " + formatted_date.strftime("%d,") + " " + formatted_date.strftime("%Y")
             if report.title() == 'Wintry Mix Possible':
@@ -262,15 +295,21 @@ while True:
     if report.title() == 'Wintry Mix Possible':
         draw.text((70, 185), string_reportaux, font=font20, fill=black)
     #Barometer trend logic block
-    if trend == 'falling':
-        baro_file = 'barodown.png'
-    elif trend == 'steady':
-        baro_file = 'barosteady.png'
-    else: #trend == 'rising':
-        baro_file = 'baroup.png'
-    baro_image = Image.open(os.path.join(icondir, baro_file))
-    template.paste(baro_image, (15, 213)) #15, 218
-    draw.text((65, 223), string_baro, font=font22, fill=black) #65,228
+    # if trend == 'falling':
+    #     baro_file = 'barodown.png'
+    # elif trend == 'steady':
+    #     baro_file = 'barosteady.png'
+    # else: #trend == 'rising':
+    #     baro_file = 'baroup.png'
+
+    # Barometer metric
+    # baro_image = Image.open(os.path.join(icondir, baro_file))
+    # template.paste(baro_image, (15, 213)) #15, 218
+    # draw.text((65, 223), string_baro, font=font22, fill=black) #65,228
+    # UV metric
+    uv_image = Image.open(os.path.join(icondir, 'uv.png'))
+    template.paste(uv_image, (15, 213)) #15, 218
+    draw.text((65, 223), "UV Index: " + str(uv_index), font=font22, fill=black) #65,228
     if temp_current <= 39 and temp_current >= 33:
         precip_file = 'mix.png'
     elif temp_current <= 32:
@@ -428,10 +467,3 @@ while True:
 
     # Write to screen
     write_to_screen(screen_output_file, 300)
-
-    # Collect garbage
-    collected = gc.collect()
-    print(f"Garbage collected {collected} objects")
-
-    # GPIO.cleanup()
-    # os.system("sudo reboot")
