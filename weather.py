@@ -169,7 +169,7 @@ while True:
                 trend = "Unknown"
             # get icon url - manually override for wind > 10mph
             icon_code = current.get('icon')
-            if icon_code != 'thunderstorm' and icon_code != 'snow' and icon_code != 'sleet' and icon_code != 'rainy' and gust >= 10:
+            if icon_code != 'thunderstorm' and icon_code != 'snow' and icon_code != 'sleet' and icon_code != 'rainy' and not icon_code.startswith('clear') and gust >= 10:
                 icon_code = 'windy2'
             else:
                 icon_code = current.get('icon')
