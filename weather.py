@@ -144,35 +144,35 @@ while True:
             # get current dict block
             current = wxdata['current_conditions']
             # get current
-            temp_current = current['air_temperature'] or "-"
+            temp_current = current.get('air_temperature') or "-"
             # get feels like
-            feels_like = current['feels_like'] or "-"
+            feels_like = current.get('feels_like') or "-"
             # get humidity
-            humidity = current['relative_humidity'] or "-"
+            humidity = current.get('relative_humidity') or "-"
             # get uv
-            uv_index = current['uv']
+            uv_index = current.get('uv') or "-"
             #get dew point
-            dewpt = current['dew_point'] or "-"
+            dewpt = current.get('dew_point') or "-"
             # get wind speed
-            wind = current['wind_avg'] or "-"
-            windcard = current['wind_direction_cardinal'] or "-"
-            gust =  current['wind_gust'] or "-"
+            wind = current.get('wind_avg') or "-"
+            windcard = current.get('wind_direction_cardinal') or "-"
+            gust =  current.get('wind_gust') or "-"
             # get description
-            report = current['conditions'] or "-"
+            report = current.get('conditions') or "-"
             if report == 'Thunderstorms Possible':
                 report = 'T-Storms Possible'
             #get pressure trend
-            baro = current['sea_level_pressure']
+            baro = current.get('sea_level_pressure')
             if 'pressure_trend' in current:
-                trend = current['pressure_trend']
+                trend = current.get('pressure_trend')
             else:
                 trend = "Unknown"
             # get icon url - manually override for wind > 10mph
-            icon_code = current['icon']
+            icon_code = current.get('icon')
             if icon_code != 'thunderstorm' and icon_code != 'snow' and icon_code != 'sleet' and icon_code != 'rainy' and gust >= 10:
                 icon_code = 'windy2'
             else:
-                icon_code = current['icon']
+                icon_code = current.get('icon')
             #Lighning strikes in the last 3 hours
             strikesraw = 0 #current['lightning_strike_count_last_3hr']
             strikes = f"{strikesraw:,}"
@@ -184,25 +184,25 @@ while True:
             daily = wxdata['forecast']['daily'][0]
 
             # get daily precip
-            daily_precip_percent = daily['precip_probability']
+            daily_precip_percent = daily.get('precip_probability')
             if 'precip_accum_local_day' in current:
-                total_rain = current['precip_accum_local_day']
+                total_rain = current.get('precip_accum_local_day')
             else:
-                total_rain = "Unknown"
+                total_rain = 0
 
             if 'precip_minutes_local_day' in current:
-                rain_time = current['precip_minutes_local_day']
+                rain_time = current.get('precip_minutes_local_day')
             else:
-                rain_time = float('inf')
+                rain_time = 0
 
             if rain_time > 0 and total_rain <= 0:
                 total_rain = 1000
             # get min and max temp
-            daily_temp = current['air_temperature']
-            temp_max = daily['air_temp_high']
-            temp_min = daily['air_temp_low']
-            sunriseepoch = daily['sunrise']
-            sunsetepoch = daily['sunset']
+            daily_temp = current.get('air_temperature')
+            temp_max = daily.get('air_temp_high')
+            temp_min = daily.get('air_temp_low')
+            sunriseepoch = daily.get('sunrise')
+            sunsetepoch = daily.get('sunset')
             #Convert epoch to readable time 
             sunrise = datetime.fromtimestamp(sunriseepoch)
             sunset = datetime.fromtimestamp(sunsetepoch)
