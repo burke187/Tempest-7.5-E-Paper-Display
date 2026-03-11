@@ -2,6 +2,7 @@
 # All data has been tweaked to be pulled from TempestWX
 
 import sys
+import math
 import os
 import RPi.GPIO as GPIO
 import gc
@@ -173,36 +174,42 @@ while True:
                 icon_code = 'windy2'
             else:
                 icon_code = current.get('icon')
-            #Lighning strikes in the last 3 hours
-            strikesraw = 0 #current['lightning_strike_count_last_3hr']
-            strikes = f"{strikesraw:,}"
-
-            #Lightning distance message
-            lightningdist = 0 #current['lightning_strike_last_distance_msg']
 
             # get daily dict block
-            daily = wxdata['forecast']['daily'][0]
+            daily = wxdata['forecast']['daily'][0] if wxdata['forecast']['daily'] else None
 
-            # get daily precip
-            daily_precip_percent = daily.get('precip_probability')
-            if 'precip_accum_local_day' in current:
-                total_rain = current.get('precip_accum_local_day')
+            # get daily values unless daily forecast is unavailable
+            if daily:
+                temp_max = daily.get('air_temp_high')
+                temp_min = daily.get('air_temp_low')
+                sunriseepoch = daily.get('sunrise')
+                sunsetepoch = daily.get('sunset')
+                daily_precip_percent = daily.get('precip_probability')
+                if 'precip_accum_local_day' in current:
+                    total_rain = current.get('precip_accum_local_day')
+                else:
+                    total_rain = 0
+
+                if 'precip_minutes_local_day' in current:
+                    rain_time = current.get('precip_minutes_local_day')
+                else:
+                    rain_time = 0
+
+                if rain_time > 0 and total_rain <= 0:
+                    total_rain = 1000
             else:
+                # Error placeholder values
+                temp_max = float('inf')
+                temp_min = float('-inf')
+                sunriseepoch = 0
+                sunsetepoch = 0
+                daily_precip_percent = 0
                 total_rain = 0
-
-            if 'precip_minutes_local_day' in current:
-                rain_time = current.get('precip_minutes_local_day')
-            else:
                 rain_time = 0
 
-            if rain_time > 0 and total_rain <= 0:
-                total_rain = 1000
             # get min and max temp
             daily_temp = current.get('air_temperature')
-            temp_max = daily.get('air_temp_high')
-            temp_min = daily.get('air_temp_low')
-            sunriseepoch = daily.get('sunrise')
-            sunsetepoch = daily.get('sunset')
+
             #Convert epoch to readable time 
             sunrise = datetime.fromtimestamp(sunriseepoch)
             sunset = datetime.fromtimestamp(sunsetepoch)
@@ -306,6 +313,7 @@ while True:
     # baro_image = Image.open(os.path.join(icondir, baro_file))
     # template.paste(baro_image, (15, 213)) #15, 218
     # draw.text((65, 223), string_baro, font=font22, fill=black) #65,228
+
     # UV metric
     uv_image = Image.open(os.path.join(icondir, 'uv.png'))
     template.paste(uv_image, (15, 213)) #15, 218
@@ -350,18 +358,6 @@ while True:
         textImg2.paste(feels_image, ((((265 + text_width) // 2 ) + 100), 3))
         template.paste(textImg2, (265, 195))
 
-    elif dewpt >= 76:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = ((textImg2.width // 2)- 35) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        feels_file = 'death.png'
-        feels_image = Image.open(os.path.join(icondir, feels_file))
-        textImg2.paste(feels_image, ((((265 + text_width) // 2 ) + 100), 3))
-        template.paste(textImg2, (265, 195))
-
     else:
         textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
         draw3 = ImageDraw.Draw(textImg2)
@@ -372,9 +368,18 @@ while True:
         template.paste(textImg2, (265, 195))
 
     # Draw bottom left box
-    draw.text((35, 330), string_temp_max, font=font50, fill=black) #35,325
+    warning_image = Image.open(os.path.join(icondir, 'warning.png'))
+    if temp_max == float("inf"):
+        template.paste(warning_image, (35, 330))
+    else:
+        draw.text((35, 330), string_temp_max, font=font50, fill=black) #35,325
+
     draw.line((170, 390, 265, 390), fill=black, width=4)
-    draw.text((35, 395), string_temp_min, font=font50, fill=black) #35,390
+
+    if temp_min == float("-inf"):
+        template.paste(warning_image, (35, 395))
+    else:
+        draw.text((35, 395), string_temp_min, font=font50, fill=black) #35,390
 
     # Draw bottom middle box
     rh_file = 'rh.png'
@@ -391,27 +396,7 @@ while True:
     draw.text((370, 435), string_wind, font=font23, fill=black) #345, 400
 
     # Draw bottom right box
-    #Begin Lightning mod
-    # if strikesraw >= 1:
-    #     strike_file = 'strike.png'
-    #     strike_image = Image.open(os.path.join(icondir, strike_file))
-    #     template.paste(strike_image, (605, 305))
-    #     draw.text((695, 330), 'Strikes', font=font22, fill=white)
-    #     draw.line((690, 355, 765, 355), fill =white, width=3)
-    #     strikeimg = Image.new(mode='RGB', size=(50, 20), color='black') 
-    #     draw1 = ImageDraw.Draw(strikeimg)
-    #     x0 = (strikeimg.width // 2)
-    #     y0 = (strikeimg.height // 2)
-    #     draw1.text((x0, y0), strikes, fill='white', font=font20, anchor='mm')
-    #     template.paste(strikeimg, (703, 360))
-    #     draw.text((685, 400), 'Distance', font=font22, fill=white)
-    #     draw.line((680, 425, 773, 425), fill =white, width=3)
-    #     draw.text((683, 430), lightningdist, font=font20, fill=white)
-    # else:
     eastern = timezone('US/Eastern')
-    # draw.text((627, 330), 'UPDATED', font=font35, fill=white)
-    # current_time = datetime.now(eastern).strftime('%H:%M')
-    # draw.text((627, 375), current_time, font = font60, fill=white)
     eastern_timezone = pytz.timezone('US/Eastern')
     sunrise_time = sunrise.astimezone(eastern_timezone).strftime('%H:%M')
     sunrise_file = 'sunrise.png'
@@ -428,6 +413,17 @@ while True:
     current_time = datetime.now(eastern).strftime('%H:%M')
     draw.text((615, 430), 'Updated: ' + current_time, font = font25, fill=black)
 
+    #Unable to pull forecast alert mod
+    if temp_max == float("inf"):
+        alert_string = "Unable to pull forecast data!"
+        textImg3 = Image.new(mode='RGB', size=(520, 50), color='white')
+        draw4 = ImageDraw.Draw(textImg3)
+        x3 = ((textImg2.width // 2) + 25) 
+        y3 = ((textImg2.height // 2) - 10)
+        draw4.text((x3, y3), alert_string, fill='black', font=font23, anchor='mm')
+        text_width, text_height = draw.textsize(alert_string, font=font23)
+        textImg3.paste(warning_image, ((((text_width) // 2 ) -110), 0))
+        template.paste(textImg3, (265, 15))
 
     #Precipitaton mod
     if total_rain > 0 or total_rain == 1000:
