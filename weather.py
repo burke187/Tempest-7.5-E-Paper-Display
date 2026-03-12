@@ -157,7 +157,7 @@ while True:
             # get wind speed
             wind = current.get('wind_avg') or "-"
             windcard = current.get('wind_direction_cardinal') or "-"
-            gust =  current.get('wind_gust') or "-"
+            gust =  current.get('wind_gust') or 0 # must be int for comparison operations when assigning icon_code
             # get description
             report = current.get('conditions') or "-"
             if report == 'Thunderstorms Possible':
