@@ -74,7 +74,7 @@ def display_error(error_source):
     # Initialize the drawing
     draw = ImageDraw.Draw(error_image)
     draw.text((100, 150), error_source +' ERROR', font=font50, fill=black)
-    draw.text((100, 300), 'Retrying in 30 seconds', font=font22, fill=black)
+    draw.text((100, 300), 'Retrying in 5 min', font=font22, fill=black)
     current_time = datetime.now().strftime('%H:%M')
     draw.text((300, 365), 'Last Refresh: ' + str(current_time), font = font50, fill=black)
     # Save the error image
@@ -105,6 +105,9 @@ grey = 'rgb(235,235,235)'
 print('Initializing and clearing screen.')
 epd.init()
 epd.Clear()
+
+#Timezone
+timezone = timezone(os.getenv('TIMEZONE'))
 
 #TempestWX URL with API Token and Station ID
 station = os.getenv('STATION_ID')
@@ -257,7 +260,7 @@ while True:
             else:    
                 string_wind = 'Wind: ' + format(wind, '.1f') + ' MPH ' + windcard 
             
-            formatted_date = datetime.now()
+            formatted_date = datetime.now(timezone)
             formatted_date_string = formatted_date.strftime("%a") + " " + formatted_date.strftime("%B") + " " + formatted_date.strftime("%d,") + " " + formatted_date.strftime("%Y")
             if report.title() == 'Wintry Mix Possible':
                 string_report = 'Now: '
@@ -396,7 +399,6 @@ while True:
     draw.text((370, 435), string_wind, font=font23, fill=black) #345, 400
 
     # Draw bottom right box
-    eastern = timezone('US/Eastern')
     eastern_timezone = pytz.timezone('US/Eastern')
     sunrise_time = sunrise.astimezone(eastern_timezone).strftime('%H:%M')
     sunrise_file = 'sunrise.png'
@@ -410,7 +412,7 @@ while True:
     template.paste(sunset_image, (550, 370)) #15, 218
     draw.text((615, 380), 'Sunset: ' + sunset_time, font=font25, fill=black) #65,228
 
-    current_time = datetime.now(eastern).strftime('%H:%M')
+    current_time = datetime.now(timezone).strftime('%H:%M')
     draw.text((615, 430), 'Updated: ' + current_time, font = font25, fill=black)
 
     #Unable to pull forecast alert mod

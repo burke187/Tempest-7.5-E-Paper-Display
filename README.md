@@ -19,11 +19,10 @@ Raspberry Pi weather display using Waveshare e-paper 7.5 inch display, Tempest W
   STATION_ID=12345
   COUNTY_CODE=YOURCODE
   TEMPEST_TOKEN=your-tempest-token
+  TIMEZONE=US/Eastern
   ```
 - Your `STATION_ID` will be in the URL when you log in:
   `https://tempestwx.com/station/XXXXXX`  
-
-- Your `TEMPEST_TOKEN` is the token you generated here: https://tempestwx.com/settings/tokens
 
 - Get your `COUNTY_CODE` from NWS to populate Watch/Warning data.  
   Steps:  
@@ -33,6 +32,10 @@ Raspberry Pi weather display using Waveshare e-paper 7.5 inch display, Tempest W
   4. Extract the coordinates from the URL and open:  
      `https://api.weather.gov/points/[start,end]`  
      Look for `"county":` in the JSON — this is your county code.
+
+- Your `TEMPEST_TOKEN` is the token you generated here: https://tempestwx.com/settings/tokens
+
+- Your pytz TIMEZONE can be found here: https://mljar.com/blog/list-pytz-timezones/
 
 - Deploy repository to Raspberry Pi:
   ```bash
