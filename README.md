@@ -35,7 +35,7 @@ Raspberry Pi weather display using Waveshare e-paper 7.5 inch display, Tempest W
 
 - Your `TEMPEST_TOKEN` is the token you generated here: https://tempestwx.com/settings/tokens
 
-- Your pytz TIMEZONE can be found here: https://mljar.com/blog/list-pytz-timezones/
+- Your pytz `TIMEZONE` can be found here: https://mljar.com/blog/list-pytz-timezones/
 
 - Deploy repository to Raspberry Pi:
   ```bash
