@@ -1,467 +1,491 @@
-# This is a heavily modified version of e_paper_weather_display
-# All data has been tweaked to be pulled from TempestWX
+#!/usr/bin/env python3
+"""E-paper weather display driven by a Tempest (WeatherFlow) station.
 
-import sys
-import math
+Heavily modified version of e_paper_weather_display: all observations come from
+the TempestWX API, severe-weather headlines from the NWS.
+
+One invocation draws a single frame and exits, so refresh scheduling belongs to
+cron / systemd rather than this script.
+"""
+
 import os
-import RPi.GPIO as GPIO
-import gc
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from functools import lru_cache
+from typing import Any, Optional
+
+import pytz
+import requests
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont
 
-# Load environment variables from .env file
-load_dotenv()
-
-picdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'pic')
-icondir = os.path.join(picdir, 'icon')
-fontdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'font')
+BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+PIC_DIR = os.path.join(BASE_DIR, 'pic')
+ICON_DIR = os.path.join(PIC_DIR, 'icon')
+FONT_FILE = os.path.join(BASE_DIR, 'font', 'Font.ttc')
 
 # Search lib folder for display driver modules
 sys.path.append('/home/admin/Tempest-7.5-E-Paper-Display-master/lib')
 
-config = {}
+# Pick the correct 7.5" Waveshare screen - current build is for the 3 color
+from lib.waveshare_epd import epd7in5_V2  # noqa: E402  (needs sys.path above)
 
-# we'd also read the config file here.....
+BLACK = 'rgb(0,0,0)'
+WHITE = 'rgb(255,255,255)'
+
+MISSING = '-'            # displayed in place of any reading the API omits
+TRACE_RAIN = 1000        # sentinel: it rained, but accumulation rounded to zero
+HTTP_TIMEOUT = 30
+
+# Error screen: keep RETRY_NOTICE honest if the cron interval changes
+RETRY_NOTICE = 'Retrying in 5 min'
+ERROR_ICON_TOP = 120
+
+# Icons that look the same day or night; everything else has -day/-night pairs
+TIME_AGNOSTIC_ICONS = ('cloudy', 'foggy', 'windy2', 'thundersnow')
+TIME_AGNOSTIC_PREFIXES = ('possibly', 'clear', 'partly')
+# Precipitation icons win over the wind override
+WIND_OVERRIDE_EXCLUDED = ('thunderstorm', 'snow', 'sleet', 'rainy')
+GUST_ICON_THRESHOLD = 10  # mph
+
+# Explicit path: cron runs from a different working directory, so relying on
+# dotenv's search would be a coin flip
+load_dotenv(os.path.join(BASE_DIR, '.env'))
+
+
+def require_env(name):
+    """Fail loudly at startup rather than deep inside a request."""
+    value = os.getenv(name)
+    if not value:
+        sys.exit(f'Missing required environment variable: {name}')
+    return value
+
+
+LOCAL_TZ = pytz.timezone(require_env('TIMEZONE'))
+SUN_TZ = pytz.timezone('US/Eastern')  # zone the sunrise/sunset times print in
+
+TEMPEST_URL = (
+    'https://swd.weatherflow.com/swd/rest/better_forecast'
+    f"?station_id={require_env('STATION_ID')}"
+    '&units_temp=f&units_wind=mph&units_pressure=inhg'
+    '&units_precip=in&units_distance=mi'
+    f"&token={require_env('TEMPEST_TOKEN')}"
+)
+NWS_URL = f"https://api.weather.gov/alerts/active?zone={require_env('COUNTY_CODE')}"
+
+
+@lru_cache(maxsize=None)
+def font(size):
+    """The display face at `size`, loaded once per size."""
+    return ImageFont.truetype(FONT_FILE, size)
+
+
+def text_width(draw, text, face):
+    """Rendered width of `text`; replaces the removed ImageDraw.textsize()."""
+    return draw.textbbox((0, 0), text, font=face)[2]
+
 
 ###########################################################
-# temporary items in lieu of reading the config file
+# Panel I/O
 ###########################################################
 
-config['twocolor_display'] = False
-
-#Pick correct 7.5" waveshare screen - current build is for the 3 color
-# use the correct module for the specified type of display
-from lib.waveshare_epd import epd7in5_V2
-epd = epd7in5_V2.EPD()
-
-from datetime import datetime
-import pytz
-from pytz import timezone
-import time
-from PIL import Image,ImageDraw,ImageFont
-import traceback
-
-import requests, urllib.request, json
-from io import BytesIO
-
-# define funciton for writing image and sleeping for 5 min.
-def write_to_screen(image, sleep_seconds):
+def write_to_screen(epd, image_path):
+    """Push a saved PNG to the panel, then put the panel back to sleep."""
     print('Writing to screen.')
-    # Write to screen
-    h_image = Image.new('1', (epd.width, epd.height), 255)
-    #red image
-    h_red_image = Image.new('1', (epd.width, epd.height), 255)  # 250*122
-    #Comment/Remove if using 2 color screen
-    draw_red = ImageDraw.Draw(h_red_image)
-    # Open the template
-    screen_output_file = Image.open(os.path.join(picdir, image))
-    # Initialize the drawing context with template as background
-    h_image.paste(screen_output_file, (0, 0))
+    frame = Image.new('1', (epd.width, epd.height), 255)
+    frame.paste(Image.open(image_path), (0, 0))
     epd.init()
-    epd.display(epd.getbuffer(h_image)) #Comment/Remove from the coma on if using a 2 color screen
-    # Sleep
+    epd.display(epd.getbuffer(frame))
     time.sleep(2)
     epd.sleep()
+
+
+def display_error(epd, detail, attempted_at):
+    """Fill the screen with an unreachable-API warning, then end the run.
+
+    `detail` says which call failed and how; `attempted_at` is when the run
+    started, so a frame left up by a long outage is obvious at a glance.
+    """
+    print(f'API unreachable: {detail}')
+    image = Image.new('1', (epd.width, epd.height), 255)
+    draw = ImageDraw.Draw(image)
+    middle = epd.width // 2
+
+    icon = Image.open(os.path.join(ICON_DIR, 'warning.png'))
+    image.paste(icon, (middle - icon.width // 2, ERROR_ICON_TOP))
+
+    draw.text((middle, 205), 'API Unreachable', font=font(60),
+              fill=BLACK, anchor='mm')
+    draw.text((middle, 265), detail, font=font(25), fill=BLACK, anchor='mm')
+    draw.text((middle, 335), f"Last attempt: {attempted_at.strftime('%H:%M')}",
+              font=font(35), fill=BLACK, anchor='mm')
+    draw.text((middle, 395), RETRY_NOTICE, font=font(22), fill=BLACK, anchor='mm')
+
+    path = os.path.join(PIC_DIR, 'error.png')
+    image.save(path)
+    image.close()
+    write_to_screen(epd, path)
     sys.exit(0)
-    # print('Sleeping for ' + str(sleep_seconds) +'.')
-    # time.sleep(sleep_seconds)
 
-# define function for displaying error
-def display_error(error_source):
-    # Display an error
-    print('Error in the', error_source, 'request.')
-    # Initialize drawing
-    error_image = Image.new('1', (epd.width, epd.height), 255)
-    # Initialize the drawing
-    draw = ImageDraw.Draw(error_image)
-    draw.text((100, 150), error_source +' ERROR', font=font50, fill=black)
-    draw.text((100, 300), 'Retrying in 5 min', font=font22, fill=black)
-    current_time = datetime.now().strftime('%H:%M')
-    draw.text((300, 365), 'Last Refresh: ' + str(current_time), font = font50, fill=black)
-    # Save the error image
-    error_image_file = 'error.png'
-    error_image.save(os.path.join(picdir, error_image_file))
-    # Close error image
-    error_image.close()
-    # Write error to screen 
-    write_to_screen(error_image_file, 30)
 
-# Set the fonts
-font20 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 20)
-font22 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 22)
-font23 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 23)
-font25 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 25)
-font30 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 30)
-font35 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 35)
-font50 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 50)
-font60 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 60)
-font100 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 100)
-font160 = ImageFont.truetype(os.path.join(fontdir, 'Font.ttc'), 160)
-# Set the colors
-black = 'rgb(0,0,0)'
-white = 'rgb(255,255,255)'
-grey = 'rgb(235,235,235)'
+###########################################################
+# Data
+###########################################################
 
-# Initialize and clear screen
-print('Initializing and clearing screen.')
-epd.init()
-epd.Clear()
+@dataclass
+class Weather:
+    """One frame's worth of readings, already in display units.
 
-#Timezone
-timezone = timezone(os.getenv('TIMEZONE'))
+    Any value the API leaves out is MISSING, and every formatter renders that
+    as '-' rather than guessing a number. Sunrise/sunset are None when the
+    daily forecast is unavailable.
+    """
 
-#TempestWX URL with API Token and Station ID
-station = os.getenv('STATION_ID')
-token = os.getenv('TEMPEST_TOKEN')
+    temp_current: Any
+    feels_like: Any
+    humidity: Any
+    dew_point: Any
+    wind: Any
+    wind_cardinal: str
+    uv_index: Any
+    report: str
+    icon_code: str
+    temp_max: Any
+    temp_min: Any
+    sunrise: Optional[datetime]
+    sunset: Optional[datetime]
+    precip_percent: Any
+    total_rain: float
+    rain_time: int
 
-#NWS Location code
-nwsloc = os.getenv('COUNTY_CODE')
-nwsapi = 'https://api.weather.gov/alerts/active?zone=' + nwsloc
 
-URL = 'https://swd.weatherflow.com/swd/rest/better_forecast?station_id=' + station + '&units_temp=f&units_wind=mph&units_pressure=inhg&units_precip=in&units_distance=mi&token=' + token
+class WeatherUnavailable(Exception):
+    """The Tempest API could not be read; the message is shown on screen."""
 
-while True:
-    # for i in range(12):
-    # Ensure there are no errors with connection
-    error_connect = True
-    while error_connect == True:
-        try:
-            # HTTP request
-            print('Attempting to connect to Tempest WX.')
-            response = requests.get(URL)
-            if response.status_code == 200:
-                print('Connection to Tempest WX successful.')
-                error_connect = None
-        except:
-            # Call function to display connection error
-            print('Connection error.')
-            display_error('CONNECTION') 
-    
-    error = None
-    while error == None:
-        # Check status of code request
-        if response.status_code == 200:
-            print('JSON pull from Tempest WX successful.')
-            # get data in jason format
-            f = urllib.request.urlopen(URL)
-            wxdata = json.load(f)
-            f.close()
-            # get current dict block
-            current = wxdata['current_conditions']
-            # get current
-            temp_current = current.get('air_temperature') or "-"
-            # get feels like
-            feels_like = current.get('feels_like') or "-"
-            # get humidity
-            humidity = current.get('relative_humidity') or "-"
-            # get uv
-            uv_index = current.get('uv') or "-"
-            #get dew point
-            dewpt = current.get('dew_point') or "-"
-            # get wind speed
-            wind = current.get('wind_avg') or "-"
-            windcard = current.get('wind_direction_cardinal') or "-"
-            gust =  current.get('wind_gust') or 0 # must be int for comparison operations when assigning icon_code
-            # get description
-            report = current.get('conditions') or "-"
-            if report == 'Thunderstorms Possible':
-                report = 'T-Storms Possible'
-            #get pressure trend
-            baro = current.get('sea_level_pressure')
-            if 'pressure_trend' in current:
-                trend = current.get('pressure_trend')
-            else:
-                trend = "Unknown"
-            # get icon url - manually override for wind > 10mph
-            icon_code = current.get('icon')
-            if icon_code != 'thunderstorm' and icon_code != 'snow' and icon_code != 'sleet' and icon_code != 'rainy' and not icon_code.startswith('clear') and gust >= 10:
-                icon_code = 'windy2'
-            else:
-                icon_code = current.get('icon')
 
-            # get daily dict block
-            daily = wxdata['forecast']['daily'][0] if wxdata['forecast']['daily'] else None
+def fetch_conditions():
+    """Tempest forecast payload, or raise WeatherUnavailable."""
+    print('Attempting to connect to Tempest WX.')
+    try:
+        response = requests.get(TEMPEST_URL, timeout=HTTP_TIMEOUT)
+    except requests.Timeout as exc:
+        raise WeatherUnavailable(
+            f'Tempest WX timed out after {HTTP_TIMEOUT}s') from exc
+    except requests.RequestException as exc:
+        raise WeatherUnavailable('Could not reach Tempest WX') from exc
 
-            # get daily values unless daily forecast is unavailable
-            if daily:
-                temp_max = daily.get('air_temp_high')
-                temp_min = daily.get('air_temp_low')
-                sunriseepoch = daily.get('sunrise')
-                sunsetepoch = daily.get('sunset')
-                daily_precip_percent = daily.get('precip_probability')
-                if 'precip_accum_local_day' in current:
-                    total_rain = current.get('precip_accum_local_day')
-                else:
-                    total_rain = 0
+    if response.status_code != 200:
+        raise WeatherUnavailable(
+            f'Tempest WX returned HTTP {response.status_code}')
 
-                if 'precip_minutes_local_day' in current:
-                    rain_time = current.get('precip_minutes_local_day')
-                else:
-                    rain_time = 0
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise WeatherUnavailable('Tempest WX sent an unreadable reply') from exc
 
-                if rain_time > 0 and total_rain <= 0:
-                    total_rain = 1000
-            else:
-                # Error placeholder values
-                temp_max = float('inf')
-                temp_min = float('-inf')
-                sunriseepoch = 0
-                sunsetepoch = 0
-                daily_precip_percent = 0
-                total_rain = 0
-                rain_time = 0
+    print('JSON pull from Tempest WX successful.')
+    return payload
 
-            # get min and max temp
-            daily_temp = current.get('air_temperature')
 
-            #Convert epoch to readable time 
-            sunrise = datetime.fromtimestamp(sunriseepoch)
-            sunset = datetime.fromtimestamp(sunsetepoch)
-            #Get Severe weather data from NWS
-            alert = None
-            string_event = None
-            response = requests.get(nwsapi)
-            nws = response.json()
+def fetch_alert_event():
+    """Headline of the first active NWS alert for the zone, if there is one.
 
-            try:
-                alert = nws['features'][int(0)]['properties']
-                event = alert['event']
-                urgency = alert['urgency']
-                severity = alert['severity']
-            except IndexError:
-                alert = None
+    Alerts are a bonus rather than a requirement: if the NWS is down the rest
+    of the frame is still worth drawing, so failures are logged and skipped.
+    """
+    try:
+        response = requests.get(NWS_URL, timeout=HTTP_TIMEOUT)
+        features = response.json().get('features') or []
+    except (requests.RequestException, ValueError) as exc:
+        print(f'Skipping NWS alerts, could not reach the NWS: {exc}')
+        return None
 
-            if alert != None:
-                string_event = event
-            
-            # Set strings to be printed to screen
-            # If temp_current is not reported
-            if temp_current == "-":
-                string_temp_current = temp_current + u'\N{DEGREE SIGN}F'
-            else:
-                string_temp_current = format(temp_current, '.0f') + u'\N{DEGREE SIGN}F'
-            # If feels_like is not reported
-            if feels_like == "-":
-                string_feels_like = 'Feels like: ' + feels_like +  u'\N{DEGREE SIGN}F'
-            else:
-                string_feels_like = 'Feels like: ' + format(feels_like, '.0f') +  u'\N{DEGREE SIGN}F'
-            # If humidity is not reported
-            if humidity == "-":
-                string_humidity = 'Humidity: ' + humidity + '%'
-            else:
-                string_humidity = 'Humidity: ' + str(humidity) + '%'
-            # If dewpt is not reported
-            if dewpt == "-":
-                string_dewpt = 'Dew Point: ' + dewpt + u'\N{DEGREE SIGN}F'
-            else:
-                string_dewpt = 'Dew Point: ' + format(dewpt, '.0f') +  u'\N{DEGREE SIGN}F'
-            # If wind is not reported
-            if wind == "-":
-                string_wind = 'Wind: ' + wind + ' MPH ' + windcard
-            else:    
-                string_wind = 'Wind: ' + format(wind, '.1f') + ' MPH ' + windcard 
-            
-            formatted_date = datetime.now(timezone)
-            formatted_date_string = formatted_date.strftime("%a") + " " + formatted_date.strftime("%B") + " " + formatted_date.strftime("%d,") + " " + formatted_date.strftime("%Y")
-            if report.title() == 'Wintry Mix Possible':
-                string_report = 'Now: '
-                string_reportaux = report.title()
-            else:
-                string_report = 'Now: ' + report.title()
-            string_baro = str(baro) + ' inHg'
-            string_temp_max = 'High: ' + format(temp_max, '>.0f') + u'\N{DEGREE SIGN}F'
-            string_temp_min = 'Low:  ' + format(temp_min, '>.0f') + u'\N{DEGREE SIGN}F'
-            string_precip_percent = 'Precip: ' + str(format(daily_precip_percent, '.0f'))  + '%'
-            if total_rain < 1000:
-                string_total_rain = 'Total: ' + str(format(total_rain, '.2f')) + ' in | Duration: ' + str(rain_time) + ' min'
-            else:
-                string_total_rain = 'Total: Trace | Duration: ' + str(rain_time) + ' min'
-            string_rain_time = str(rain_time) + 'min'
+    if not features:
+        print('No Severe Weather')
+        return None
+    return features[0].get('properties', {}).get('event')
 
-            # Set error code to false
-            error = False
 
+def storm_icon(current):
+    """Icon name, overridden to windy when it is gusty but not precipitating."""
+    icon_code = reading(current, 'icon')
+    gust = current.get('wind_gust') or 0
+    if (not is_missing(icon_code)
+            and gust >= GUST_ICON_THRESHOLD
+            and icon_code not in WIND_OVERRIDE_EXCLUDED
+            and not icon_code.startswith('clear')):
+        return 'windy2'
+    return icon_code
+
+
+def reading(block, key):
+    """A value from the API, or MISSING when it is absent or null."""
+    value = block.get(key)
+    return MISSING if value is None else value
+
+
+def parse_weather(wxdata):
+    current = wxdata['current_conditions']
+
+    report = reading(current, 'conditions')
+    if report == 'Thunderstorms Possible':
+        report = 'T-Storms Possible'
+
+    daily = wxdata['forecast']['daily'][0] if wxdata['forecast']['daily'] else {}
+    sunrise_epoch = daily.get('sunrise')
+    sunset_epoch = daily.get('sunset')
+
+    total_rain = current.get('precip_accum_local_day') or 0
+    rain_time = current.get('precip_minutes_local_day') or 0
+    if rain_time > 0 and total_rain <= 0:
+        total_rain = TRACE_RAIN
+
+    return Weather(
+        temp_current=reading(current, 'air_temperature'),
+        feels_like=reading(current, 'feels_like'),
+        humidity=reading(current, 'relative_humidity'),
+        dew_point=reading(current, 'dew_point'),
+        wind=reading(current, 'wind_avg'),
+        wind_cardinal=reading(current, 'wind_direction_cardinal'),
+        uv_index=reading(current, 'uv'),
+        report=report,
+        icon_code=storm_icon(current),
+        temp_max=reading(daily, 'air_temp_high'),
+        temp_min=reading(daily, 'air_temp_low'),
+        sunrise=datetime.fromtimestamp(sunrise_epoch) if sunrise_epoch else None,
+        sunset=datetime.fromtimestamp(sunset_epoch) if sunset_epoch else None,
+        precip_percent=reading(daily, 'precip_probability'),
+        total_rain=total_rain,
+        rain_time=rain_time,
+    )
+
+
+###########################################################
+# Formatting
+###########################################################
+
+def is_missing(value):
+    """True for anything the API did not report, including NaN."""
+    return value == MISSING or value is None or value != value
+
+
+def fmt_number(value, decimals=0):
+    """'-' for a missing reading, otherwise the value rounded for display."""
+    return MISSING if is_missing(value) else f'{value:.{decimals}f}'
+
+
+def fmt_temp(value):
+    return f'{fmt_number(value)}\N{DEGREE SIGN}F'
+
+
+def fmt_wind(speed, cardinal):
+    return f'Wind: {fmt_number(speed, 1)} MPH {cardinal}'
+
+
+def fmt_clock(moment):
+    return MISSING if moment is None else moment.astimezone(SUN_TZ).strftime('%H:%M')
+
+
+def fmt_rain(total_rain, rain_time):
+    amount = 'Trace' if total_rain >= TRACE_RAIN else f'{total_rain:.2f} in'
+    return f'Total: {amount} | Duration: {rain_time} min'
+
+
+def fmt_date(moment):
+    return moment.strftime('%a %B %d, %Y')
+
+
+###########################################################
+# Rendering
+###########################################################
+
+def icon_filename(icon_code, now, sunrise, sunset):
+    if (icon_code.startswith(TIME_AGNOSTIC_PREFIXES)
+            or icon_code in TIME_AGNOSTIC_ICONS):
+        return f'{icon_code}.png'
+    # Without sun times we cannot tell day from night, so assume night
+    if sunrise and sunset and sunrise <= now < sunset:
+        return f'{icon_code}-day.png'
+    return f'{icon_code}-night.png'
+
+
+def precip_icon(temp_current):
+    """Snow below freezing, wintry mix just above it, rain otherwise."""
+    if is_missing(temp_current):
+        return 'precip.png'
+    if temp_current <= 32:
+        return 'snow.png'
+    if temp_current <= 39:
+        return 'mix.png'
+    return 'precip.png'
+
+
+def paste_icon(template, name, position):
+    template.paste(Image.open(os.path.join(ICON_DIR, name)), position)
+
+
+def draw_current_panel(template, draw, wx):
+    """Top left: conditions icon, headline, UV index and precip chance."""
+    if not is_missing(wx.icon_code):
+        paste_icon(template, icon_filename(wx.icon_code, datetime.now(),
+                                           wx.sunrise, wx.sunset), (40, 15))
+
+    report = wx.report.title()
+    if report == 'Wintry Mix Possible':
+        # Too long for one line at font 22, so the label drops to a second line
+        draw.text((15, 183), 'Now:', font=font(22), fill=BLACK)
+        draw.text((70, 185), report, font=font(20), fill=BLACK)
+    else:
+        draw.text((15, 183), f'Now: {report}', font=font(22), fill=BLACK)
+
+    # The barometer metric (sea_level_pressure plus a rising/steady/falling
+    # arrow) used to occupy this slot - see weather.py.orig to swap it back in.
+    paste_icon(template, 'uv.png', (15, 213))
+    draw.text((65, 223), f'UV Index: {wx.uv_index}', font=font(22), fill=BLACK)
+
+    paste_icon(template, precip_icon(wx.temp_current), (15, 255))
+    draw.text((65, 263), f'Precip: {fmt_number(wx.precip_percent)}%',
+              font=font(22), fill=BLACK)
+
+
+def draw_feels_like(template, draw, wx):
+    """Feels-like line, centred, flagged with a finger icon when it diverges."""
+    text = f'Feels like: {fmt_temp(wx.feels_like)}'
+    if is_missing(wx.feels_like) or is_missing(wx.temp_current):
+        icon = None  # nothing to compare, so no hot/cold flag
+    else:
+        difference = int(wx.feels_like) - int(wx.temp_current)
+        if difference >= 5:
+            icon = 'finghot.png'
+        elif difference <= -5:
+            icon = 'fingcold.png'
         else:
-            # Call function to display HTTP error
-            display_error('HTTP')
+            icon = None
 
-    # Open template file
-    template = Image.open(os.path.join(picdir, 'template.png'))
-    # Initialize the drawing context with template as background
+    panel = Image.new('RGB', (520, 65), WHITE)
+    panel_draw = ImageDraw.Draw(panel)
+    # Shift left to leave room for the icon
+    x = panel.width // 2 - (35 if icon else 0)
+    panel_draw.text((x, panel.height // 2), text,
+                    fill=BLACK, font=font(50), anchor='mm')
+    if icon:
+        width = text_width(draw, text, font(50))
+        paste_icon(panel, icon, ((265 + width) // 2 + 100, 3))
+    template.paste(panel, (265, 195))
+
+
+def draw_temperature_panel(template, draw, wx):
+    """Top right: date, the big current temperature, and feels-like."""
+    draw.text((425, 30), fmt_date(datetime.now(LOCAL_TZ)),
+              font=font(22), fill=BLACK)
+    draw.text((365, 35), fmt_temp(wx.temp_current), font=font(160), fill=BLACK)
+    draw_feels_like(template, draw, wx)
+
+
+def draw_forecast_panel(template, draw, wx):
+    """Bottom left: today's high and low, '-' when the forecast is unavailable."""
+    draw.text((35, 330), f'High: {fmt_temp(wx.temp_max)}',
+              font=font(50), fill=BLACK)
+    draw.line((170, 390, 265, 390), fill=BLACK, width=4)
+    draw.text((35, 395), f'Low:  {fmt_temp(wx.temp_min)}',
+              font=font(50), fill=BLACK)
+
+
+def draw_comfort_panel(template, draw, wx):
+    """Bottom middle: humidity, dew point, wind."""
+    rows = (
+        ('rh.png', 320, f'Humidity: {fmt_number(wx.humidity)}%'),
+        ('dp.png', 373, f'Dew Point: {fmt_temp(wx.dew_point)}'),
+        ('wind.png', 425, fmt_wind(wx.wind, wx.wind_cardinal)),
+    )
+    for icon, y, text in rows:
+        paste_icon(template, icon, (320, y))
+        draw.text((370, y + 10), text, font=font(23), fill=BLACK)
+
+
+def draw_sun_panel(template, draw, wx):
+    """Bottom right: sunrise, sunset, and this refresh's timestamp."""
+    rows = (
+        ('sunrise.png', 320, f'Sunrise: {fmt_clock(wx.sunrise)}'),
+        ('sunset.png', 370, f'Sunset: {fmt_clock(wx.sunset)}'),
+        (None, 420, f"Updated: {datetime.now(LOCAL_TZ).strftime('%H:%M')}"),
+    )
+    for icon, y, text in rows:
+        if icon:
+            paste_icon(template, icon, (550, y))
+        draw.text((615, y + 10), text, font=font(25), fill=BLACK)
+
+
+def draw_banner(template, draw, text, icon):
+    """Top centre strip, shared by the rain total and the forecast warning."""
+    panel = Image.new('RGB', (520, 50), WHITE)
+    panel_draw = ImageDraw.Draw(panel)
+    # y is 22 rather than the panel's own centre: that is where the original
+    # layout put this text, and the strip has been tuned around it.
+    panel_draw.text((panel.width // 2 + 25, 22), text,
+                    fill=BLACK, font=font(23), anchor='mm')
+    width = text_width(draw, text, font(23))
+    paste_icon(panel, icon, (width // 2 - 110, 0))
+    template.paste(panel, (265, 15))
+
+
+def draw_alert(template, draw, event):
+    """Severe-weather headline, centred near the bottom of the screen."""
+    panel = Image.new('RGB', (380, 40), WHITE)
+    panel_draw = ImageDraw.Draw(panel)
+    panel_draw.text((panel.width // 2 + 25, panel.height // 2), event,
+                    fill=BLACK, font=font(23), anchor='mm')
+    width = text_width(draw, event, font(23))
+    paste_icon(panel, 'warning.png', ((380 - width) // 2 - 25, 0))
+    template.paste(panel, (330, 255))
+
+
+def render_frame(wx, event):
+    """Compose the frame onto the template and return the saved PNG's path."""
+    template = Image.open(os.path.join(PIC_DIR, 'template.png'))
     draw = ImageDraw.Draw(template)
 
-    # Draw top left box
-    #Logic for nighttime....DAYTIME
-    nowcheck = datetime.now()
-    if icon_code.startswith('possibly') or icon_code == 'thundersnow' or icon_code  == 'cloudy' or icon_code == 'foggy' or icon_code == 'windy2' or icon_code.startswith('clear') or icon_code.startswith('partly'):
-        icon_file = icon_code + '.png'
-    elif nowcheck >= sunrise and nowcheck < sunset:
-        icon_file = icon_code + '-day.png'
-    else:
-        icon_file = icon_code + '-night.png'
-    icon_image = Image.open(os.path.join(icondir, icon_file))
-    template.paste(icon_image, (40, 15))
-    ## Place a black rectangle outline
-    draw.text((15, 183), string_report, font=font22, fill=black) #15, 190
-    if report.title() == 'Wintry Mix Possible':
-        draw.text((70, 185), string_reportaux, font=font20, fill=black)
-    #Barometer trend logic block
-    # if trend == 'falling':
-    #     baro_file = 'barodown.png'
-    # elif trend == 'steady':
-    #     baro_file = 'barosteady.png'
-    # else: #trend == 'rising':
-    #     baro_file = 'baroup.png'
+    draw_current_panel(template, draw, wx)
+    draw_temperature_panel(template, draw, wx)
+    draw_forecast_panel(template, draw, wx)
+    draw_comfort_panel(template, draw, wx)
+    draw_sun_panel(template, draw, wx)
 
-    # Barometer metric
-    # baro_image = Image.open(os.path.join(icondir, baro_file))
-    # template.paste(baro_image, (15, 213)) #15, 218
-    # draw.text((65, 223), string_baro, font=font22, fill=black) #65,228
+    # Both banners share one slot; rain wins when there is rain to report
+    if is_missing(wx.temp_max):
+        draw_banner(template, draw, 'Unable to pull forecast data!', 'warning.png')
+    if wx.total_rain > 0:
+        draw_banner(template, draw, fmt_rain(wx.total_rain, wx.rain_time),
+                    'totalrain.png')
+    if event:
+        draw_alert(template, draw, event)
 
-    # UV metric
-    uv_image = Image.open(os.path.join(icondir, 'uv.png'))
-    template.paste(uv_image, (15, 213)) #15, 218
-    draw.text((65, 223), "UV Index: " + str(uv_index), font=font22, fill=black) #65,228
-    if temp_current <= 39 and temp_current >= 33:
-        precip_file = 'mix.png'
-    elif temp_current <= 32:
-        precip_file = 'snow.png'
-    else:
-        precip_file = 'precip.png'
-    precip_image = Image.open(os.path.join(icondir, precip_file))
-    template.paste(precip_image, (15, 255)) #15, 260
-    draw.text((65, 263), string_precip_percent, font=font22, fill=black) #65, 268
-
-    # Draw top right box
-    draw.text((425, 30), formatted_date_string, font=font22, fill=black)
-    draw.text((365, 35), string_temp_current, font=font160, fill=black) #375,35
-    difference = int(feels_like) - int(temp_current)
-
-    #Center feels like with icons
-    if difference >= 5:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = ((textImg2.width // 2)- 35) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        feels_file = 'finghot.png'
-        feels_image = Image.open(os.path.join(icondir, feels_file))
-        textImg2.paste(feels_image, ((((265 + text_width) // 2 ) + 100), 3))
-        template.paste(textImg2, (265, 195))
-
-    elif difference <= -5:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = ((textImg2.width // 2)- 35) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        feels_file = 'fingcold.png'
-        feels_image = Image.open(os.path.join(icondir, feels_file))
-        textImg2.paste(feels_image, ((((265 + text_width) // 2 ) + 100), 3))
-        template.paste(textImg2, (265, 195))
-
-    else:
-        textImg2 = Image.new(mode='RGB', size=(520, 65), color='white')
-        draw3 = ImageDraw.Draw(textImg2)
-        x2 = (textImg2.width // 2) 
-        y2 = (textImg2.height // 2)
-        draw3.text((x2, y2), string_feels_like, fill='black', font=font50, anchor='mm')
-        text_width, text_height = draw.textsize(string_feels_like, font=font50)
-        template.paste(textImg2, (265, 195))
-
-    # Draw bottom left box
-    warning_image = Image.open(os.path.join(icondir, 'warning.png'))
-    if temp_max == float("inf"):
-        template.paste(warning_image, (35, 330))
-    else:
-        draw.text((35, 330), string_temp_max, font=font50, fill=black) #35,325
-
-    draw.line((170, 390, 265, 390), fill=black, width=4)
-
-    if temp_min == float("-inf"):
-        template.paste(warning_image, (35, 395))
-    else:
-        draw.text((35, 395), string_temp_min, font=font50, fill=black) #35,390
-
-    # Draw bottom middle box
-    rh_file = 'rh.png'
-    rh_image = Image.open(os.path.join(icondir, rh_file))
-    template.paste(rh_image, (320, 320))
-    draw.text((370, 330), string_humidity, font=font23, fill=black) #345, 340
-    dp_file = 'dp.png'
-    dp_image = Image.open(os.path.join(icondir, dp_file))
-    template.paste(dp_image, (320, 373))
-    draw.text((370, 383), string_dewpt, font=font23, fill=black)
-    wind_file = 'wind.png'
-    wind_image = Image.open(os.path.join(icondir, wind_file))
-    template.paste(wind_image, (320, 425))
-    draw.text((370, 435), string_wind, font=font23, fill=black) #345, 400
-
-    # Draw bottom right box
-    eastern_timezone = pytz.timezone('US/Eastern')
-    sunrise_time = sunrise.astimezone(eastern_timezone).strftime('%H:%M')
-    sunrise_file = 'sunrise.png'
-    sunrise_image = Image.open(os.path.join(icondir, sunrise_file))
-    template.paste(sunrise_image, (550, 320)) #15, 218
-    draw.text((615, 330), 'Sunrise: ' + sunrise_time, font=font25, fill=black) #65,228
-
-    sunset_time = sunset.astimezone(eastern_timezone).strftime('%H:%M')
-    sunset_file = 'sunset.png'
-    sunset_image = Image.open(os.path.join(icondir, sunset_file))
-    template.paste(sunset_image, (550, 370)) #15, 218
-    draw.text((615, 380), 'Sunset: ' + sunset_time, font=font25, fill=black) #65,228
-
-    current_time = datetime.now(timezone).strftime('%H:%M')
-    draw.text((615, 430), 'Updated: ' + current_time, font = font25, fill=black)
-
-    #Unable to pull forecast alert mod
-    if temp_max == float("inf"):
-        alert_string = "Unable to pull forecast data!"
-        textImg3 = Image.new(mode='RGB', size=(520, 50), color='white')
-        draw4 = ImageDraw.Draw(textImg3)
-        x3 = ((textImg2.width // 2) + 25) 
-        y3 = ((textImg2.height // 2) - 10)
-        draw4.text((x3, y3), alert_string, fill='black', font=font23, anchor='mm')
-        text_width, text_height = draw.textsize(alert_string, font=font23)
-        textImg3.paste(warning_image, ((((text_width) // 2 ) -110), 0))
-        template.paste(textImg3, (265, 15))
-
-    #Precipitaton mod
-    if total_rain > 0 or total_rain == 1000:
-        textImg3 = Image.new(mode='RGB', size=(520, 50), color='white')
-        draw4 = ImageDraw.Draw(textImg3)
-        x3 = ((textImg2.width // 2) + 25) 
-        y3 = ((textImg2.height // 2) - 10)
-        draw4.text((x3, y3), string_total_rain, fill='black', font=font23, anchor='mm')
-        text_width, text_height = draw.textsize(string_total_rain, font=font23)
-        train_file = 'totalrain.png'
-        train_image = Image.open(os.path.join(icondir, train_file))
-        textImg3.paste(train_image, ((((text_width) // 2 ) -110), 0))
-        template.paste(textImg3, (265, 15))
-
-    #Severe Weather Mod
-    try:
-         if string_event != None:
-
-            #Center the warning data at the borttom of the screen
-            textImg = Image.new(mode='RGB', size=(380, 40), color='white')
-            draw2 = ImageDraw.Draw(textImg)
-            x = (textImg.width // 2 + 25)
-            y = (textImg.height // 2)
-            draw2.text((x, y), string_event, fill='black', font=font23, anchor='mm')
-            text_width, text_height = draw.textsize(string_event, font=font23)
-            alert_file = 'warning.png'
-            alert_image = Image.open(os.path.join(icondir, alert_file))
-            textImg.paste(alert_image, ((((380 - text_width) // 2 ) - 25), 0))
-            template.paste(textImg, (330, 255))
-    except NameError:
-        print('No Severe Weather')
-    # Save the image for display as PNG
-    screen_output_file = os.path.join(picdir, 'screen_output.png')
-    template.save(screen_output_file)
-    # Close the template file
+    path = os.path.join(PIC_DIR, 'screen_output.png')
+    template.save(path)
     template.close()
+    return path
 
-    # Write to screen
-    write_to_screen(screen_output_file, 300)
+
+def main():
+    epd = epd7in5_V2.EPD()
+    print('Initializing and clearing screen.')
+    epd.init()
+    epd.Clear()
+
+    attempted_at = datetime.now(LOCAL_TZ)
+    try:
+        wx = parse_weather(fetch_conditions())
+    except WeatherUnavailable as exc:
+        display_error(epd, str(exc), attempted_at)
+    except (KeyError, TypeError, ValueError) as exc:
+        # HTTP 200 carrying an unexpected shape is still a failed pull
+        print(f'Unexpected Tempest payload: {exc!r}')
+        display_error(epd, 'Tempest WX sent unexpected data', attempted_at)
+
+    write_to_screen(epd, render_frame(wx, fetch_alert_event()))
+
+
+if __name__ == '__main__':
+    main()
